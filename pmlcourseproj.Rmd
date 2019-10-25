@@ -1,0 +1,78 @@
+---
+title: "PMLCourseProj"
+author: "Sagi Ganot"
+date: "2019 M10 24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This project involves the Weight Lifting Exercises Dataset created by Groupware@LES. In the creation of this dataset, six participants were asked to lift dumbbells in five different ways: the correct way (Class A) and a number of specific incorrect ways (Classes B-E). For each lifting, the class was recorded, along with accelerometer measurements on the belt, forearm and arm of the participants, as well as the dumbbells themselves. The purpose of the project is to be able to predict the class from the accelerator measurements.
+
+For the purposes of this project, the data has been divided into a training set (n=19622) and a testing set (n=20). The variable classe represents the class, 152 variables represent the accelerometer measurements, and 7 contain general information. 
+
+```{r}
+pml_train <- read.csv("pml-training.csv")
+pml_test <- read.csv("pml-testing.csv")
+```
+
+Just from looking at the raw data, it appears that 67 of the 160 variables contain no information for most or all of the observations. Therefore, I removed these variables from the entire training set.
+
+```{r subset}
+table(!is.na(pml_train[1,]))
+table(!is.na(pml_train[10,]))
+table(!is.na(pml_train[100,]))
+pml_train2 <- pml_train[,!is.na(pml_train[1,]) & pml_train[1,] != ""]
+```
+
+
+I set aside the original testing set, only to be used with the final model. The original training set I then divided into a training set (60%) and a validation set (40%). Because of the large number of observations, I did not see the need for further cross-validation.
+
+```{r slice}
+set.seed(3005)
+library(caret)
+inTrain <- createDataPartition(pml_train2$classe,p=0.6,list=FALSE)
+pml_train3 <- pml_train2[inTrain,]
+pml_valid <- pml_train2[-inTrain,]
+```
+
+I next checked to see whether some of the variables were highly correlated, with a view towards reducing their number, and found that indeed many were highly correlated:
+
+```{r correlate}
+M <- abs(cor(pml_train3[,8:59]))
+diag(M) <- 0
+which(M>0.8,arr.ind=T)
+```
+
+Therefore, I decided to try and train the model using principal component analysis (PCA), in order to reduce the number of variables and remove some of the highly correlated ones. I used PCA in the pre-processing phase, then proceeded to train a random forest model.
+
+```{r train}
+
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+train_rf <- train(classe~.,pml_train3,method="rf",preProcess="pca",trainControl=fitControl,cache=TRUE)
+stopCluster(cluster)
+```
+
+Next, I predicted the variable classe on the validation data, achieving 98.6% accuracy, which represents the expected out-of-sample error.
+
+```{r predict on validation data}
+pred_valid <- predict(train_rf,newdata=pml_valid)
+confusionMatrix(pred_valid,pml_valid$classe)
+```
+
+Lastly, I predicted the values for the test data. These values proved to be correct, with the exception of #3, for an out-of-sample error of 5%.
+
+```{r predict on test data}
+pred_test <- predict(train_rf,newdata=pml_test)
+pred_test
+```
